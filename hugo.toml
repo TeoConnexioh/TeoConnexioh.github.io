@@ -43,5 +43,13 @@ theme = "PaperMod"
     url = "/search/"
     weight = 30
 
+[params.assets]
+  disableFingerprinting = false
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+
 [outputs]
   home = ["HTML", "RSS", "JSON"]
