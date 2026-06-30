@@ -382,8 +382,13 @@ function applyROIEffect(rx, ry, rw, rh) {
   const d  = id.data;
 
   if (MODES[currentMode].id === 'AI_ANIME') {
-    ctx.putImageData(id, x, y); // restore while async runs
-    applyAIAnime(x, y, w, h);
+    ctx.putImageData(id, x, y); // restore video pixels first
+    // Paint last cached AI result immediately — eliminates flicker
+    if (aiLastResult && aiLastROI.w > 0) {
+      ctx.drawImage(aiLastResult, 0, 0, AI_SIZE, AI_SIZE,
+                    aiLastROI.x, aiLastROI.y, aiLastROI.w, aiLastROI.h);
+    }
+    applyAIAnime(x, y, w, h); // async update in background
     return;
   }
 
@@ -743,8 +748,11 @@ function hexRgb(hex) {
 // ─── AI ANIME (@magenta/image + TF.js 0.14.1) ────────────────────────────────
 let aiNet = null;
 let aiStyleCanvas = null;
-let aiState = 'idle'; // idle | loading | ready | error
+let aiStyleVec = null;       // pre-computed style vector (computed once)
+let aiState = 'idle';        // idle | loading | ready | error
 let aiFrameActive = false;
+let aiLastResult = null;     // cached result canvas — drawn every frame to prevent flicker
+let aiLastROI = {x:0,y:0,w:0,h:0};
 
 function buildAnimeStyleCanvas() {
   const c = document.createElement('canvas');
@@ -826,6 +834,8 @@ async function loadAIModels() {
     aiNet = new mi.ArbitraryStyleTransferNetwork();
     await aiNet.initialize();
     aiStyleCanvas = buildAnimeStyleCanvas();
+    // Pre-compute style vector once — reused every frame
+    aiStyleVec = aiNet.predictStyleParameters(aiStyleCanvas);
     aiState = 'ready';
     statusEl.textContent = 'AI ANIME READY';
   } catch (e) {
@@ -848,10 +858,25 @@ async function applyAIAnime(x, y, w, h) {
 
   aiFrameActive = true;
   try {
+    // Snapshot current ROI into offscreen canvas
     aiOffCtx.drawImage(canvas, x, y, w, h, 0, 0, AI_SIZE, AI_SIZE);
-    const imageData = await aiNet.stylize(aiOffCanvas, aiStyleCanvas);
-    aiOffCtx.putImageData(imageData, 0, 0);
-    ctx.drawImage(aiOffCanvas, 0, 0, AI_SIZE, AI_SIZE, x, y, w, h);
+
+    // Use pre-computed style vector — skip style prediction every frame
+    const stylized = aiNet.produceStylized(aiOffCanvas, aiStyleVec);
+    const bytes = await mi.tf.toPixels(stylized);
+    stylized.dispose();
+
+    const imageData = new ImageData(bytes, AI_SIZE, AI_SIZE);
+
+    // Cache result for flicker-free display
+    if (!aiLastResult) {
+      aiLastResult = document.createElement('canvas');
+      aiLastResult.width = aiLastResult.height = AI_SIZE;
+    }
+    aiLastResult.getContext('2d').putImageData(imageData, 0, 0);
+    aiLastROI = {x, y, w, h};
+
+    ctx.drawImage(aiLastResult, 0, 0, AI_SIZE, AI_SIZE, x, y, w, h);
   } catch (e) {
     console.warn('AI frame error:', e);
   } finally {
