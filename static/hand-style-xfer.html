@@ -200,7 +200,8 @@ video { display: none; }
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@0.14.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@magenta/image@0.2.1/dist/magentaimage.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
 <script>
@@ -739,13 +740,11 @@ function hexRgb(hex) {
   return `${r},${g},${b}`;
 }
 
-// ─── AI ANIME (TF.js Magenta + procedural anime style image) ─────────────────
-let tfStyleNet = null, tfTransformNet = null, tfStyleVec = null;
+// ─── AI ANIME (@magenta/image + TF.js 0.14.1) ────────────────────────────────
+let aiNet = null;
+let aiStyleCanvas = null;
 let aiState = 'idle'; // idle | loading | ready | error
 let aiFrameActive = false;
-
-const AI_STYLE_MODEL = 'https://storage.googleapis.com/tfjs-models/savedmodel/arbitrary-image-stylization-v1-256/uint8/predictor/1/model.json';
-const AI_TRANSFORM_MODEL = 'https://storage.googleapis.com/tfjs-models/savedmodel/arbitrary-image-stylization-v1-256/uint8/transformer/1/model.json';
 
 function buildAnimeStyleCanvas() {
   const c = document.createElement('canvas');
@@ -821,18 +820,12 @@ function buildAnimeStyleCanvas() {
 async function loadAIModels() {
   if (aiState !== 'idle') return;
   aiState = 'loading';
-  statusEl.textContent = 'AI MODEL LOADING...';
+  statusEl.textContent = 'AI MODEL LOADING (~30s)...';
   try {
-    await tf.ready();
-    tfStyleNet     = await tf.loadGraphModel(AI_STYLE_MODEL);
-    tfTransformNet = await tf.loadGraphModel(AI_TRANSFORM_MODEL);
-
-    const styleCanvas = buildAnimeStyleCanvas();
-    tfStyleVec = tf.tidy(() => {
-      const t = tf.browser.fromPixels(styleCanvas).toFloat().div(255).expandDims(0);
-      return tfStyleNet.predict(t);
-    });
-
+    // mi = window.mi from @magenta/image bundle
+    aiNet = new mi.ArbitraryStyleTransferNetwork();
+    await aiNet.initialize();
+    aiStyleCanvas = buildAnimeStyleCanvas();
     aiState = 'ready';
     statusEl.textContent = 'AI ANIME READY';
   } catch (e) {
@@ -842,40 +835,21 @@ async function loadAIModels() {
   }
 }
 
-const AI_SIZE = 224; // must be divisible by 8; smaller = faster
+const AI_SIZE = 256;
 const aiOffCanvas = document.createElement('canvas');
 aiOffCanvas.width = aiOffCanvas.height = AI_SIZE;
 const aiOffCtx = aiOffCanvas.getContext('2d');
 
 async function applyAIAnime(x, y, w, h) {
-  if (aiFrameActive) return; // skip if previous frame still processing
-
+  if (aiFrameActive) return;
   if (aiState === 'idle') { loadAIModels(); return; }
   if (aiState !== 'ready') return;
 
   aiFrameActive = true;
   try {
-    // Snapshot current ROI into the fixed-size offscreen canvas
     aiOffCtx.drawImage(canvas, x, y, w, h, 0, 0, AI_SIZE, AI_SIZE);
-
-    const result = await tf.tidy(() => {
-      const content = tf.browser.fromPixels(aiOffCanvas).toFloat().div(255).expandDims(0);
-      const stylized = tfTransformNet.predict([content, tfStyleVec]);
-      return stylized.squeeze().mul(255).clipByValue(0, 255).cast('int32');
-    });
-
-    const raw = await result.data();
-    result.dispose();
-
-    // Write to offscreen canvas then draw back to main canvas
-    const imgData = new ImageData(AI_SIZE, AI_SIZE);
-    for (let i = 0; i < AI_SIZE * AI_SIZE; i++) {
-      imgData.data[i*4]   = raw[i*3];
-      imgData.data[i*4+1] = raw[i*3+1];
-      imgData.data[i*4+2] = raw[i*3+2];
-      imgData.data[i*4+3] = 255;
-    }
-    aiOffCtx.putImageData(imgData, 0, 0);
+    const imageData = await aiNet.stylize(aiOffCanvas, aiStyleCanvas);
+    aiOffCtx.putImageData(imageData, 0, 0);
     ctx.drawImage(aiOffCanvas, 0, 0, AI_SIZE, AI_SIZE, x, y, w, h);
   } catch (e) {
     console.warn('AI frame error:', e);
