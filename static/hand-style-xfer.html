@@ -1,4 +1,5 @@
 
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>VISION SYS — Hand Style Transfer</title>
 <style>
 @keyframes scan {
@@ -200,7 +201,6 @@ video { display: none; }
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@0.14.1/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@magenta/image@0.2.1/dist/magentaimage.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
@@ -830,7 +830,8 @@ async function loadAIModels() {
     statusEl.textContent = 'AI ANIME READY';
   } catch (e) {
     aiState = 'error';
-    statusEl.textContent = 'AI LOAD FAILED';
+    const msg = e && e.message ? e.message.slice(0, 80) : String(e);
+    statusEl.textContent = 'AI FAIL: ' + msg;
     console.error('AI load error:', e);
   }
 }
